@@ -7,6 +7,18 @@ A modular, view-only file viewer for Android with a Material You (Material 3) in
 
 ## Features
 
+### Markdown Viewer
+- Full CommonMark rendering via `compose-markdown` library
+- Headings, bold, italic, strikethrough, lists, tables, code blocks, blockquotes
+- Inline images and links (opens in browser)
+- Text selection support
+- Settings: font size (12–24sp), font family (Sans/Serif/Mono), line height (Compact/Comfortable/Spacious)
+- LaTeX math rendering toggle ($$...$$, \[...\], $...$, \(...\))
+- Code block line numbers toggle
+- Table word wrap toggle
+- Inline images toggle
+- Links use accent color (hardcoded)
+
 ### Text Viewer
 - Monospace rendering with configurable line numbers and line wrapping
 - Code editor-style line number gutter that stays fixed during horizontal scroll
@@ -27,13 +39,15 @@ A modular, view-only file viewer for Android with a Material You (Material 3) in
 
 | Module | Extensions | Features |
 |--------|-----------|----------|
-| **Text** | `.txt`, `.md`, `.json`, `.xml`, `.log`, `.csv`, `.yaml`, `.yml`, `.ini`, `.cfg`, `.conf`, `.java`, `.kt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.sh`, `.sql`, `.diff`, `.patch`, … | Monospace rendering, line numbers, line wrapping, horizontal scroll, settings panel |
+| **Markdown** | `.md`, `.markdown`, `.mdx` | Full markdown rendering (headings, lists, tables, code blocks, images, links), font size/family/line height controls, LaTeX support, settings panel |
+| **Text** | `.txt`, `.json`, `.xml`, `.log`, `.csv`, `.yaml`, `.yml`, `.ini`, `.cfg`, `.conf`, `.java`, `.kt`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.sh`, `.sql`, `.diff`, `.patch`, … | Monospace rendering, line numbers, line wrapping, horizontal scroll, settings panel |
 | **Image** | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.svg`, `.heic`, `.heif`, `.ico`, `.tiff`, `.tif` | Pinch-to-zoom, pan, double-tap zoom, nearest-neighbor toggle, settings panel |
 
 ## Architecture
 
 - **`core/`** — Shared contract (`FileViewerModule`, `ModuleRegistry`, `FileRef`, `ViewerContext`)
 - **`app/`** — Base application (file picker, navigation, Material 3 theme, settings panel)
+- **`markdown/`** — Markdown viewer module with persistent settings (`MarkdownSettings`)
 - **`text/`** — Text viewer module with persistent settings (`TextSettings`)
 - **`image/`** — Image viewer module with persistent settings (`ImageSettings`)
 

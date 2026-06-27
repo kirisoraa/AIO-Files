@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.aiofiles.core.ModuleRegistry
 import com.aiofiles.image.ImageModule
+import com.aiofiles.markdown.MarkdownModule
 import com.aiofiles.text.TextModule
 
 private const val TAG = "AioFilesApp"
@@ -24,6 +25,7 @@ class AioFilesApplication : Application() {
 
         // Register all available modules
         ModuleRegistry.register(ImageModule())
+        ModuleRegistry.register(MarkdownModule())
         ModuleRegistry.register(TextModule())
 
         Log.d(TAG, "Registered ${ModuleRegistry.size()} module(s)")
