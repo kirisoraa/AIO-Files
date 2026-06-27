@@ -15,11 +15,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,9 +32,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aiofiles.core.FileRef
+import com.aiofiles.core.FileViewerModule
 import com.aiofiles.core.ModuleRegistry
 import com.aiofiles.core.ViewerContext
 import kotlinx.coroutines.launch
@@ -47,6 +51,7 @@ private const val TAG = "ViewerScreen"
  * 2. Resolves it to a FileRef with metadata
  * 3. Queries ModuleRegistry for handlers
  * 4. Renders the module's viewer UI, or shows an error if no handler found
+ * 5. Shows module settings in a bottom sheet when available
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +67,7 @@ fun ViewerScreen(
     var fileRef by remember { mutableStateOf<FileRef?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
 
     // Resolve file metadata
     LaunchedEffect(fileUri) {
@@ -101,6 +107,10 @@ fun ViewerScreen(
         }
     }
 
+    val handlers = fileRef?.let { ModuleRegistry.findHandlers(it) }.orEmpty()
+    val activeModule = handlers.firstOrNull()
+    val hasSettings = activeModule?.settingsContent != null
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -113,90 +123,133 @@ fun ViewerScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            painter = androidx.compose.ui.res.painterResource(android.R.drawable.ic_menu_revert),
+                            painter = painterResource(android.R.drawable.ic_menu_revert),
                             contentDescription = "Back",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
+                    }
+                },
+                actions = {
+                    if (hasSettings) {
+                        IconButton(
+                            onClick = { showSettings = true }
+                        ) {
+                            Icon(
+                                painter = painterResource(android.R.drawable.ic_menu_preferences),
+                                contentDescription = "Settings",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
-        when {
-            isLoading -> {
-                Box(
-                    modifier = modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+        FileContentArea(
+            isLoading = isLoading,
+            error = error,
+            fileRef = fileRef,
+            handlers = handlers,
+            context = context,
+            scope = scope,
+            snackbarHostState = snackbarHostState,
+            onBack = onBack,
+            modifier = modifier.padding(paddingValues)
+        )
+    }
 
-            error != null -> {
-                Column(
-                    modifier = modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(32.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        painter = androidx.compose.ui.res.painterResource(android.R.drawable.ic_dialog_alert),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-                    Text(
-                        text = "Error",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Text(
-                        text = error!!,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-            }
+    // Settings bottom sheet
+    if (showSettings && hasSettings) {
+        val sheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(
+            onDismissRequest = { showSettings = false },
+            sheetState = sheetState
+        ) {
+            activeModule?.settingsContent?.invoke()
+        }
+    }
+}
 
-            fileRef != null -> {
-                val handlers = ModuleRegistry.findHandlers(fileRef!!)
-                Log.d(TAG, "Found ${handlers.size} handler(s) for ${fileRef!!.name}")
-
-                val viewerContext = ViewerContext(
-                    context = context,
-                    resources = context.resources,
-                    onBack = onBack,
-                    onError = { message ->
-                        scope.launch {
-                            snackbarHostState.showSnackbar(message)
-                        }
-                    }
+/**
+ * Renders the main content area of the viewer — loading, error, file content, or no-handler state.
+ */
+@Composable
+private fun FileContentArea(
+    isLoading: Boolean,
+    error: String?,
+    fileRef: FileRef?,
+    handlers: List<FileViewerModule>,
+    context: android.content.Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    snackbarHostState: SnackbarHostState,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    when {
+        isLoading -> {
+            Box(
+                modifier = modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary
                 )
+            }
+        }
 
-                when {
-                    handlers.isEmpty() -> {
-                        NoHandlerFoundScreen(
-                            fileRef = fileRef!!,
-                            modifier = modifier
-                                .fillMaxSize()
-                                .padding(paddingValues)
-                        )
+        error != null -> {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(32.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    painter = painterResource(android.R.drawable.ic_dialog_alert),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                Text(
+                    text = "Error",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+
+        fileRef != null -> {
+            val viewerContext = ViewerContext(
+                context = context,
+                resources = context.resources,
+                onBack = onBack,
+                onError = { message ->
+                    scope.launch {
+                        snackbarHostState.showSnackbar(message)
                     }
+                }
+            )
 
-                    else -> {
-                        // Pass paddingValues to the module so it respects the scaffold
-                        Box(modifier = Modifier.padding(paddingValues)) {
-                            handlers[0].viewerContent(fileRef!!, viewerContext)
-                        }
+            when {
+                handlers.isEmpty() -> {
+                    NoHandlerFoundScreen(
+                        fileRef = fileRef,
+                        modifier = modifier.fillMaxSize()
+                    )
+                }
+
+                else -> {
+                    Box(modifier = modifier.fillMaxSize()) {
+                        handlers[0].viewerContent(fileRef, viewerContext)
                     }
                 }
             }
@@ -219,7 +272,7 @@ private fun NoHandlerFoundScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            painter = androidx.compose.ui.res.painterResource(android.R.drawable.ic_dialog_alert),
+            painter = painterResource(android.R.drawable.ic_dialog_alert),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.error,
             modifier = Modifier.padding(bottom = 16.dp)

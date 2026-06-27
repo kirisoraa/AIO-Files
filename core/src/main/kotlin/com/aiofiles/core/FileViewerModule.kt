@@ -64,6 +64,16 @@ interface FileViewerModule {
     fun viewerContent(file: FileRef, context: ViewerContext)
 
     /**
+     * Optional composable that renders a settings panel for this module.
+     * Return null if this module has no user-facing settings.
+     *
+     * The returned Composable is displayed in a ModalBottomSheet from the
+     * ViewerScreen settings icon. Settings state should be managed in a
+     * singleton object so preferences persist across files.
+     */
+    val settingsContent: (@Composable () -> Unit)? get() = null
+
+    /**
      * Returns true if this module can handle the given file.
      *
      * Default implementation checks extension and MIME type against

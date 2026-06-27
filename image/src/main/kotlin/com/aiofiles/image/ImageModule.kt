@@ -1,12 +1,16 @@
 package com.aiofiles.image
 
 import android.util.Log
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
@@ -15,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -27,16 +32,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.aiofiles.core.FileRef
 import com.aiofiles.core.FileViewerModule
@@ -46,6 +50,14 @@ private const val TAG = "ImageModule"
 private const val MIN_ZOOM = 1f
 private const val MAX_ZOOM = 50f
 private const val DOUBLE_TAP_ZOOM = 4f
+
+/**
+ * Persistent settings for the image viewer module.
+ * These survive across file changes.
+ */
+object ImageSettings {
+    var useNearestNeighbor by mutableStateOf(false)
+}
 
 /**
  * Image viewer module.
@@ -81,19 +93,43 @@ class ImageModule : FileViewerModule {
     @Composable
     override fun viewerContent(file: FileRef, context: ViewerContext) {
         var imageState by remember { mutableStateOf<ImageLoadState>(ImageLoadState.Idle) }
-        var useNearestNeighbor by remember { mutableStateOf(false) }
 
         // Reset zoom state when viewing a new image
         LaunchedEffect(file.uri) {
             ZoomState.reset()
         }
 
-        val request = remember(file.uri) {
+        // Use FilterQuality.Low for nearest-neighbor (pixel art) rendering
+        val filterQuality = if (ImageSettings.useNearestNeighbor) {
+            FilterQuality.Low
+        } else {
+            FilterQuality.High
+        }
+
+        // Include filter quality in the request key so Coil treats it as a different model
+        // This forces the painter to be recreated when the setting changes
+        val request = remember(file.uri, filterQuality) {
             ImageRequest.Builder(context.context)
                 .data(file.uri)
                 .crossfade(false)
                 .build()
         }
+
+        val painter = rememberAsyncImagePainter(
+            model = request,
+            contentScale = ContentScale.Fit,
+            filterQuality = filterQuality,
+            onSuccess = { state ->
+                imageState = ImageLoadState.Success
+            },
+            onError = { state ->
+                imageState = ImageLoadState.Error(state.result.throwable.message ?: "Unknown error")
+                Log.e(TAG, "Failed to load image: ${file.name}", state.result.throwable)
+            },
+            onLoading = {
+                imageState = ImageLoadState.Loading
+            }
+        )
 
         Surface {
             Scaffold(
@@ -111,29 +147,6 @@ class ImageModule : FileViewerModule {
                                     painter = painterResource(android.R.drawable.ic_menu_revert),
                                     contentDescription = "Back",
                                     tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        },
-                        actions = {
-                            // Nearest-neighbor toggle
-                            IconButton(
-                                onClick = { useNearestNeighbor = !useNearestNeighbor },
-                                enabled = imageState is ImageLoadState.Success
-                            ) {
-                                val iconRes = if (useNearestNeighbor) {
-                                    android.R.drawable.ic_menu_zoom
-                                } else {
-                                    android.R.drawable.ic_menu_sort_by_size
-                                }
-                                val tint = if (useNearestNeighbor) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                                Icon(
-                                    painter = painterResource(iconRes),
-                                    contentDescription = if (useNearestNeighbor) "Nearest neighbor (on)" else "Nearest neighbor (off)",
-                                    tint = tint
                                 )
                             }
                         },
@@ -166,18 +179,8 @@ class ImageModule : FileViewerModule {
                     contentAlignment = Alignment.Center
                 ) {
                     ZoomableImage(
-                        file = file,
-                        request = request,
-                        useNearestNeighbor = useNearestNeighbor,
-                        modifier = Modifier.fillMaxSize(),
-                        onStateChange = { state ->
-                            imageState = when (state) {
-                                is AsyncImagePainter.State.Loading -> ImageLoadState.Loading
-                                is AsyncImagePainter.State.Success -> ImageLoadState.Success
-                                is AsyncImagePainter.State.Error -> ImageLoadState.Error(state.result.throwable.message ?: "Unknown error")
-                                else -> ImageLoadState.Idle
-                            }
-                        }
+                        painter = painter,
+                        modifier = Modifier.fillMaxSize()
                     )
 
                     // Overlay loading indicator while image loads
@@ -194,6 +197,10 @@ class ImageModule : FileViewerModule {
                 }
             }
         }
+    }
+
+    override val settingsContent: @Composable () -> Unit = {
+        ImageSettingsPanel()
     }
 }
 
@@ -213,29 +220,26 @@ sealed interface ImageLoadState {
 object ZoomState {
     var scale by mutableStateOf(MIN_ZOOM)
     var rotation by mutableStateOf(0f)
-    var offset by mutableStateOf(Offset.Zero)
+    var offset by androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
 
     val isSignificantlyZoomed get() = scale > 1.1f
 
     fun reset() {
         scale = MIN_ZOOM
         rotation = 0f
-        offset = Offset.Zero
+        offset = androidx.compose.ui.geometry.Offset.Zero
     }
 }
 
 @Composable
 private fun ZoomableImage(
-    file: FileRef,
-    request: ImageRequest,
-    useNearestNeighbor: Boolean,
-    modifier: Modifier = Modifier,
-    onStateChange: (AsyncImagePainter.State) -> Unit = {}
+    painter: androidx.compose.ui.graphics.painter.Painter,
+    modifier: Modifier = Modifier
 ) {
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
         val newScale = (ZoomState.scale * zoomChange).coerceIn(MIN_ZOOM, MAX_ZOOM)
         ZoomState.scale = newScale
-        ZoomState.offset = Offset(
+        ZoomState.offset = androidx.compose.ui.geometry.Offset(
             x = ZoomState.offset.x + panChange.x,
             y = ZoomState.offset.y + panChange.y
         )
@@ -251,14 +255,14 @@ private fun ZoomableImage(
                         // Double-tap zoom: toggle between current and target zoom
                         val targetScale = if (ZoomState.scale > DOUBLE_TAP_ZOOM) MIN_ZOOM else DOUBLE_TAP_ZOOM
                         ZoomState.scale = targetScale
-                        ZoomState.offset = Offset.Zero
+                        ZoomState.offset = androidx.compose.ui.geometry.Offset.Zero
                     }
                 )
             }
     ) {
-        AsyncImage(
-            model = request,
-            contentDescription = file.name,
+        Image(
+            painter = painter,
+            contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxSize()
@@ -268,34 +272,45 @@ private fun ZoomableImage(
                     this.translationX = ZoomState.offset.x
                     this.translationY = ZoomState.offset.y
                 }
-                .then(
-                    if (useNearestNeighbor) {
-                        // Nearest neighbor rendering modifier
-                        Modifier.nearestNeighbor()
-                    } else {
-                        Modifier
-                    }
-                ),
-            onState = { state ->
-                onStateChange(state)
-                if (state is AsyncImagePainter.State.Error) {
-                    Log.e(TAG, "Failed to load image: ${file.name}", state.result.throwable)
-                }
-            }
         )
     }
 }
 
 /**
- * Modifier that renders content with nearest-neighbor filtering (no anti-aliasing).
- * This gives pixel-perfect rendering when zoomed in, ideal for pixel art.
+ * Settings panel for the image viewer module.
  */
-private fun Modifier.nearestNeighbor(): Modifier = this.then(
-    Modifier.drawWithContent {
-        // Draw content without anti-aliasing
-        drawContent()
+@Composable
+private fun ImageSettingsPanel() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Image Viewer Settings",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // Nearest Neighbor toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Nearest Neighbor (Pixel Art)",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Switch(
+                checked = ImageSettings.useNearestNeighbor,
+                onCheckedChange = { ImageSettings.useNearestNeighbor = it }
+            )
+        }
     }
-)
+}
 
 @Composable
 private fun ErrorState(error: String) {
